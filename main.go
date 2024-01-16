@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"pokedexcli/internal/pokecache"
+	"time"
 )
 
 type clicommand struct {
@@ -80,19 +82,25 @@ func commandPreviousMap(conf *config) error {
 }
 
 func fetchLocations(url *string, conf *config) error {
-	res, err := http.Get(*url)
-	if err != nil {
-		return err
-	}
+	body, cached := cache.Get(*url)
+	if !cached {
+		res, err := http.Get(*url)
+		if err != nil {
+			return err
+		}
 
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		return err
+		resBody, err := io.ReadAll(res.Body)
+		if err != nil {
+			return err
+		}
+		res.Body.Close()
+		body = resBody
+
+		cache.Add(*url, body)
 	}
-	res.Body.Close()
 
 	locations := locationdata{}
-	err = json.Unmarshal(body, &locations)
+	err := json.Unmarshal(body, &locations)
 	if err != nil {
 		return err
 	}
@@ -108,8 +116,6 @@ func fetchLocations(url *string, conf *config) error {
 		fmt.Println(location.Name)
 	}
 
-	fmt.Println(next)
-	fmt.Println(previous)
 	*conf.next = next
 	conf.previous = previous
 	fmt.Println(*conf)
@@ -121,6 +127,8 @@ func commandExit(conf *config) error {
 	return nil
 }
 
+var cache pokecache.Cache
+
 func main() {
 	initCommands()
 	next := "https://pokeapi.co/api/v2/location-area/"
@@ -128,6 +136,8 @@ func main() {
 		next:     &next,
 		previous: nil,
 	}
+
+	cache = pokecache.NewCache(5 * time.Second)
 
 	scanner := bufio.NewScanner(os.Stdin)
 	running := true
