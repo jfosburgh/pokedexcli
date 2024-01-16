@@ -57,7 +57,7 @@ func main() {
 			fmt.Println("Command not recognized")
 		} else {
 			if cmd.name == "exit" {
-				os.Exit(0)
+				running = false
 			}
 			err := cmd.callback()
 			if err != nil {
