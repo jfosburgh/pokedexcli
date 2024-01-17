@@ -9,13 +9,14 @@ import (
 	"net/http"
 	"os"
 	"pokedexcli/internal/pokecache"
+	"strings"
 	"time"
 )
 
 type clicommand struct {
 	name     string
 	message  string
-	callback func(*config) error
+	callback func(string, *config) error
 }
 
 type config struct {
@@ -23,7 +24,7 @@ type config struct {
 	previous *string
 }
 
-type locationdata struct {
+type locationlist struct {
 	Count    int    `json:"count"`
 	Next     string `json:"next"`
 	Previous any    `json:"previous"`
@@ -31,6 +32,59 @@ type locationdata struct {
 		Name string `json:"name"`
 		URL  string `json:"url"`
 	} `json:"results"`
+}
+
+type locationdata struct {
+	EncounterMethodRates []struct {
+		EncounterMethod struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"encounter_method"`
+		VersionDetails []struct {
+			Rate    int `json:"rate"`
+			Version struct {
+				Name string `json:"name"`
+				URL  string `json:"url"`
+			} `json:"version"`
+		} `json:"version_details"`
+	} `json:"encounter_method_rates"`
+	GameIndex int `json:"game_index"`
+	ID        int `json:"id"`
+	Location  struct {
+		Name string `json:"name"`
+		URL  string `json:"url"`
+	} `json:"location"`
+	Name  string `json:"name"`
+	Names []struct {
+		Language struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"language"`
+		Name string `json:"name"`
+	} `json:"names"`
+	PokemonEncounters []struct {
+		Pokemon struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"pokemon"`
+		VersionDetails []struct {
+			EncounterDetails []struct {
+				Chance          int   `json:"chance"`
+				ConditionValues []any `json:"condition_values"`
+				MaxLevel        int   `json:"max_level"`
+				Method          struct {
+					Name string `json:"name"`
+					URL  string `json:"url"`
+				} `json:"method"`
+				MinLevel int `json:"min_level"`
+			} `json:"encounter_details"`
+			MaxChance int `json:"max_chance"`
+			Version   struct {
+				Name string `json:"name"`
+				URL  string `json:"url"`
+			} `json:"version"`
+		} `json:"version_details"`
+	} `json:"pokemon_encounters"`
 }
 
 var commands = map[string]clicommand{}
@@ -52,6 +106,11 @@ func initCommands() {
 			message:  "Displays the previous 20 map locations",
 			callback: commandPreviousMap,
 		},
+		"explore": {
+			name:     "explore",
+			message:  "Choose a location to explore: explore <location>",
+			callback: commandExplore,
+		},
 		"exit": {
 			name:     "exit",
 			message:  "Exit the pokedex",
@@ -60,7 +119,7 @@ func initCommands() {
 	}
 }
 
-func commandHelp(conf *config) error {
+func commandHelp(param string, conf *config) error {
 	fmt.Println("\nWelcome to the Pokedex!\nUsage:")
 	messages := "\n"
 	for name, command := range commands {
@@ -70,28 +129,39 @@ func commandHelp(conf *config) error {
 	return nil
 }
 
-func commandNextMap(conf *config) error {
-	return fetchLocations(conf.next, conf)
-}
-
-func commandPreviousMap(conf *config) error {
-	if conf.previous == nil {
-		return errors.New("Already on the first page")
+func commandExplore(location string, conf *config) error {
+	url := fmt.Sprintf("https://pokeapi.co/api/v2/location-area/%s/", location)
+	body, err := useCache(&url)
+	if err != nil {
+		return err
 	}
-	return fetchLocations(conf.previous, conf)
+
+	locationData := locationdata{}
+	err = json.Unmarshal(body, &locationData)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Exploring %s...\n", location)
+	fmt.Println("Found Pokemon:")
+	for _, pokemonEncounter := range locationData.PokemonEncounters {
+		fmt.Printf(" - %s\n", pokemonEncounter.Pokemon.Name)
+	}
+
+	return nil
 }
 
-func fetchLocations(url *string, conf *config) error {
+func useCache(url *string) ([]byte, error) {
 	body, cached := cache.Get(*url)
 	if !cached {
 		res, err := http.Get(*url)
 		if err != nil {
-			return err
+			return make([]byte, 0), err
 		}
 
 		resBody, err := io.ReadAll(res.Body)
 		if err != nil {
-			return err
+			return make([]byte, 0), err
 		}
 		res.Body.Close()
 		body = resBody
@@ -99,8 +169,24 @@ func fetchLocations(url *string, conf *config) error {
 		cache.Add(*url, body)
 	}
 
-	locations := locationdata{}
-	err := json.Unmarshal(body, &locations)
+	return body, nil
+}
+
+func commandNextMap(param string, conf *config) error {
+	return fetchLocations(conf.next, conf)
+}
+
+func commandPreviousMap(param string, conf *config) error {
+	if conf.previous == nil {
+		return errors.New("Already on the first page")
+	}
+	return fetchLocations(conf.previous, conf)
+}
+
+func fetchLocations(url *string, conf *config) error {
+	body, err := useCache(url)
+	locations := locationlist{}
+	err = json.Unmarshal(body, &locations)
 	if err != nil {
 		return err
 	}
@@ -123,7 +209,7 @@ func fetchLocations(url *string, conf *config) error {
 	return nil
 }
 
-func commandExit(conf *config) error {
+func commandExit(param string, conf *config) error {
 	return nil
 }
 
@@ -137,22 +223,28 @@ func main() {
 		previous: nil,
 	}
 
-	cache = pokecache.NewCache(5 * time.Second)
+	cache = pokecache.NewCache(30 * time.Second)
 
 	scanner := bufio.NewScanner(os.Stdin)
 	running := true
 	for running {
 		fmt.Printf("pokedex> ")
 		scanner.Scan()
-		enteredCommand := scanner.Text()
-		cmd, ok := commands[enteredCommand]
+
+		enteredCommand := strings.Fields(scanner.Text())
+		cmd, ok := commands[enteredCommand[0]]
+		param := ""
+		if len(enteredCommand) > 1 {
+			param = enteredCommand[1]
+		}
+
 		if !ok {
 			fmt.Println("Command not recognized")
 		} else {
 			if cmd.name == "exit" {
 				running = false
 			}
-			err := cmd.callback(&conf)
+			err := cmd.callback(param, &conf)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "\nEncountered error completing command %s: %v\n\n", cmd.name, err)
 			}
