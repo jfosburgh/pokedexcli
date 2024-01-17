@@ -391,6 +391,11 @@ func initCommands() {
 			message:  "Inspect details of caught pokemon: inspect <pokemon>",
 			callback: commandInspect,
 		},
+		"pokedex": {
+			name:     "pokedex",
+			message:  "List your caught pokemon",
+			callback: commandPokedex,
+		},
 		"exit": {
 			name:     "exit",
 			message:  "Exit the pokedex",
@@ -406,6 +411,15 @@ func commandHelp(param string, conf *config, pokedex map[string]pokemondata) err
 		messages += fmt.Sprintf("%s: %s\n", name, command.message)
 	}
 	fmt.Println(messages)
+	return nil
+}
+
+func commandPokedex(param string, conf *config, pokedex map[string]pokemondata) error {
+	fmt.Println("Your pokedex:")
+	for name := range pokedex {
+		fmt.Printf(" - %s\n", name)
+	}
+
 	return nil
 }
 
@@ -473,6 +487,7 @@ func commandCatch(pokemonName string, conf *config, pokedex map[string]pokemonda
 	if catchChance > pokemon.BaseExperience || catchChance > 195 {
 		fmt.Printf("%s was caught!\n", pokemonName)
 		pokedex[pokemonName] = pokemon
+		fmt.Printf("You may now inspect %s\n", pokemonName)
 	} else {
 		fmt.Printf("%s escaped!\n", pokemonName)
 	}
