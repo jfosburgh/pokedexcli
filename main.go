@@ -19,7 +19,7 @@ var expRange = []int{20, 608}
 type clicommand struct {
 	name     string
 	message  string
-	callback func(string, *config) error
+	callback func(string, *config, map[string]pokemondata) error
 }
 
 type config struct {
@@ -386,6 +386,11 @@ func initCommands() {
 			message:  "Attempt to catch a pokemon: catch <pokemon>",
 			callback: commandCatch,
 		},
+		"inspect": {
+			name:     "inspect",
+			message:  "Inspect details of caught pokemon: inspect <pokemon>",
+			callback: commandInspect,
+		},
 		"exit": {
 			name:     "exit",
 			message:  "Exit the pokedex",
@@ -394,7 +399,7 @@ func initCommands() {
 	}
 }
 
-func commandHelp(param string, conf *config) error {
+func commandHelp(param string, conf *config, pokedex map[string]pokemondata) error {
 	fmt.Println("\nWelcome to the Pokedex!\nUsage:")
 	messages := "\n"
 	for name, command := range commands {
@@ -404,7 +409,31 @@ func commandHelp(param string, conf *config) error {
 	return nil
 }
 
-func commandExplore(location string, conf *config) error {
+func commandInspect(param string, conf *config, pokedex map[string]pokemondata) error {
+	pokemon, ok := pokedex[param]
+	if !ok {
+		fmt.Println("you have not caught that pokemon")
+		return nil
+	}
+
+	message := fmt.Sprintf("Name: %s\n", pokemon.Name)
+	message += fmt.Sprintf("Height: %d\n", pokemon.Height)
+	message += fmt.Sprintf("Weight: %d\n", pokemon.Weight)
+	message += fmt.Sprintf("Stats:\n")
+	for _, stat := range pokemon.Stats {
+		message += fmt.Sprintf("  - %s: %d\n", stat.Stat.Name, stat.BaseStat)
+	}
+	message += fmt.Sprintln("Types:")
+	for _, pType := range pokemon.Types {
+		message += fmt.Sprintf("  - %s\n", pType.Type.Name)
+	}
+
+	fmt.Println(message)
+
+	return nil
+}
+
+func commandExplore(location string, conf *config, pokedex map[string]pokemondata) error {
 	url := fmt.Sprintf("https://pokeapi.co/api/v2/location-area/%s/", location)
 	body, err := useCache(&url)
 	if err != nil {
@@ -426,7 +455,7 @@ func commandExplore(location string, conf *config) error {
 	return nil
 }
 
-func commandCatch(pokemonName string, conf *config) error {
+func commandCatch(pokemonName string, conf *config, pokedex map[string]pokemondata) error {
 	url := fmt.Sprintf("https://pokeapi.co/api/v2/pokemon/%s/", pokemonName)
 	body, err := useCache(&url)
 	if err != nil {
@@ -443,6 +472,7 @@ func commandCatch(pokemonName string, conf *config) error {
 	catchChance := rand.Intn(200)
 	if catchChance > pokemon.BaseExperience || catchChance > 195 {
 		fmt.Printf("%s was caught!\n", pokemonName)
+		pokedex[pokemonName] = pokemon
 	} else {
 		fmt.Printf("%s escaped!\n", pokemonName)
 	}
@@ -471,11 +501,11 @@ func useCache(url *string) ([]byte, error) {
 	return body, nil
 }
 
-func commandNextMap(param string, conf *config) error {
+func commandNextMap(param string, conf *config, pokedex map[string]pokemondata) error {
 	return fetchLocations(conf.next, conf)
 }
 
-func commandPreviousMap(param string, conf *config) error {
+func commandPreviousMap(param string, conf *config, pokedex map[string]pokemondata) error {
 	if conf.previous == nil {
 		return errors.New("Already on the first page")
 	}
@@ -508,11 +538,12 @@ func fetchLocations(url *string, conf *config) error {
 	return nil
 }
 
-func commandExit(param string, conf *config) error {
+func commandExit(param string, conf *config, pokedex map[string]pokemondata) error {
 	return nil
 }
 
 var cache pokecache.Cache
+var pokedex = map[string]pokemondata{}
 
 func main() {
 	initCommands()
@@ -543,7 +574,7 @@ func main() {
 			if cmd.name == "exit" {
 				running = false
 			}
-			err := cmd.callback(param, &conf)
+			err := cmd.callback(param, &conf, pokedex)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "\nEncountered error completing command %s: %v\n\n", cmd.name, err)
 			}
